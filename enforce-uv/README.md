@@ -40,9 +40,13 @@ is.
   to). Rule 3 — the global-install guard — stays on regardless, because a
   system-wide pip install is dangerous either way.
 - Anything run through omp's `eval` tool (the stateful IPython `py` kernel). The
-  guard only intercepts the `bash` tool, so installing into a live kernel with
-  `!uv pip install <pkg>` / `%pip install <pkg>` inside a cell is never touched —
-  which is correct, since a live interpreter has no file to declare deps in.
+  guard only intercepts the `bash` tool, so an in-kernel install with
+  `!uv pip install <pkg>` (or `%pip install <pkg>` — `python -m pip` — only when
+  uv is unavailable) is never touched. That is correct **only when the kernel is
+  backed by an isolated venv** (an active/project `.venv`, or the managed
+  `~/.omp/python-env`). If the kernel fell back to the system interpreter, create
+  or select a venv first — otherwise an in-kernel install mutates system Python
+  (rule 3), a path this bash-only guard cannot see.
 
 ## Override
 
