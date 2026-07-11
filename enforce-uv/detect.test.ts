@@ -69,6 +69,7 @@ describe("rule 3 — no global installs", () => {
     "sudo -H pip3 install foo",
     "python3 -m pip install --user foo",
     "doas pip install foo",
+    "sudo -u root pip install foo",
   ])("blocks %s as pip-global", (cmd) => {
     expect(kind(cmd)).toBe("pip-global");
   });
@@ -79,6 +80,7 @@ describe("rule 3 — no global installs", () => {
     "sudo uv pip install foo",
     "sudo -H uv pip install foo",
     "doas uv pip install foo",
+    "sudo -u root uv pip install foo",
   ])("blocks %s as uv-global", (cmd) => {
     expect(kind(cmd)).toBe("uv-global");
   });
@@ -86,8 +88,6 @@ describe("rule 3 — no global installs", () => {
 
 describe("uv-native commands are allowed", () => {
   test.each([
-    "uv pip install requests",
-    "uv pip install -r requirements.txt",
     "uvx black",
     'uvx "yt-dlp[default,curl-cffi]"',
     "uv tool install ruff",
@@ -97,6 +97,48 @@ describe("uv-native commands are allowed", () => {
     "uv venv",
   ])("allows %s", (cmd) => {
     expect(kind(cmd)).toBeNull();
+  });
+});
+
+describe("uv pip install is soft-blocked (rule 1)", () => {
+  test.each([
+    "uv pip install requests",
+    "uv pip install -r requirements.txt",
+    "uv pip install --python /tmp/.venv/bin/python ruamel.yaml",
+    "bash -c 'uv pip install foo'",
+  ])("blocks %s as uv-pip", (cmd) => {
+    expect(kind(cmd)).toBe("uv-pip");
+  });
+
+  test.each([
+    "OMP_ALLOW_UV_PIP_INSTALL=1 uv pip install foo",
+    "OMP_ALLOW_UV_PIP_INSTALL=true uv pip install foo",
+    "OMP_ALLOW_UV_PIP_INSTALL=yes uv pip install foo",
+    "OMP_ALLOW_UV_PIP_INSTALL=1 uv pip install --python /tmp/.venv/bin/python ruamel.yaml",
+    "OMP_ALLOW_UV_PIP_INSTALL=1 bash -c 'uv pip install foo'",
+  ])("override prefix allows %s", (cmd) => {
+    expect(kind(cmd)).toBeNull();
+  });
+
+  test.each(["OMP_ALLOW_UV_PIP_INSTALL=0 uv pip install foo", "FOO=1 uv pip install foo"])(
+    "non-truthy / unrelated assignment stays blocked: %s",
+    (cmd) => {
+      expect(kind(cmd)).toBe("uv-pip");
+    },
+  );
+
+  test("process-env override allows it", () => {
+    expect(
+      analyzeCommand("uv pip install foo", { uvAvailable: true, envOverride: true }),
+    ).toBeNull();
+  });
+
+  test("override never bypasses a global/system install", () => {
+    expect(kind("OMP_ALLOW_UV_PIP_INSTALL=1 sudo uv pip install foo")).toBe("uv-global");
+    expect(kind("OMP_ALLOW_UV_PIP_INSTALL=1 uv pip install --system foo")).toBe("uv-global");
+    expect(
+      analyzeCommand("sudo uv pip install foo", { uvAvailable: true, envOverride: true })?.kind,
+    ).toBe("uv-global");
   });
 });
 
@@ -128,11 +170,13 @@ describe("shell -c wrappers are unwrapped", () => {
     ['zsh -c "pip list"', "pip-other"],
     ["env bash -c 'pip install foo'", "pip-install"],
     ["bash -c 'cd /tmp && pip install foo'", "pip-install"],
+    ["sh -c 'uv pip install foo'", "uv-pip"],
+    ["bash -c 'uv pip install foo'", "uv-pip"],
   ])("unwraps %s → %s", (cmd, expected) => {
     expect(kind(cmd)).toBe(expected);
   });
 
-  test.each(["bash -c 'echo pip install'", "sh -c 'uv pip install foo'", "bash script.sh"])(
+  test.each(["bash -c 'echo pip install'", "bash script.sh"])(
     "leaves %s alone",
     (cmd) => {
       expect(kind(cmd)).toBeNull();
@@ -165,6 +209,8 @@ describe("buildReason", () => {
     ["pipx run black", /uvx <pkg>/],
     ["uv pip install --system foo", /rule 3/],
     ["pipx inject black rich", /uv tool install <tool-pkg> --with <extra-pkg>/],
+    ["uv pip install ruamel.yaml", /OMP_ALLOW_UV_PIP_INSTALL=1/],
+    ["uv pip install foo", /pyproject\.toml/],
   ])("%s → reason matches %s", (cmd, re) => {
     const v = analyzeCommand(cmd, WITH_UV);
     expect(v).not.toBeNull();

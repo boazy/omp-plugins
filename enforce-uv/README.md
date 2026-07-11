@@ -16,6 +16,11 @@ block message teaches the agent the correct uv-native workflow instead.
 | 2 | Never use pipx when uvx / `uv tool` fits | `pipx install/run/upgrade/inject …`, `python -m pipx …` |
 | 3 | Never install globally | `sudo pip install`, `pip install --user`, `pip install --break-system-packages`, and `uv pip install --system/--break-system-packages` |
 
+Plus a **soft block** on plain `uv pip install …` (rule 1): it is the
+pip-compatibility escape hatch and usually the wrong first move versus a PEP 723
+script or a `pyproject.toml`. Unlike the hard blocks above it can be overridden
+(see [Override](#override)).
+
 Detection is command-aware: it splits on `&&`, `||`, `;`, `|`, and newlines,
 strips leading env assignments and wrappers (`sudo`, `doas`, `env`, `nohup`, …),
 and understands `python -m pip`. So `echo "pip install x"` and
@@ -24,8 +29,8 @@ is.
 
 ### What is *not* blocked
 
-- Anything uv-native: `uv pip install`, `uv add`, `uv run`, `uvx`, `uv tool …`,
-  `uv venv`.
+- uv-native project/tool commands: `uv add`, `uv run`, `uvx`, `uv tool …`, `uv venv`
+  (plain `uv pip install` is soft-blocked — see rule 1 above).
 - pip subcommands with no clean uv parity: `pip download`, `pip wheel`,
   `pip config`, `pip cache`, `pip hash`, `pip index`.
 - pipx-only subcommands with no uv counterpart: `pipx runpip`, `pipx environment`,
@@ -37,11 +42,21 @@ is.
 
 ## Override
 
-There is **no command-line escape hatch** (e.g. an env flag), on purpose: the
-agent would just prepend it and defeat the guard. The only override is an
-interactive human confirming the prompt. In headless / subagent runs (no UI) the
-command is always blocked, and the block reason is returned to the model so it can
-pick a correct alternative on its own.
+The hard blocks — rules 2–3 and `pip install` — have **no command-line escape
+hatch**, by design: the agent would just prepend it. Their only bypass is an
+interactive human confirming the prompt; headless / subagent runs are always
+blocked, with the reason returned to the model so it can pick an alternative.
+
+The one **soft** block — plain `uv pip install` — is overridable so a deliberate
+install can proceed:
+
+- **Per command:** prefix it — `OMP_ALLOW_UV_PIP_INSTALL=1 uv pip install <pkg>`.
+- **Session-wide:** launch omp with `OMP_ALLOW_UV_PIP_INSTALL=1` already exported.
+
+A bare `export …` *inside* a bash tool call does **not** work — it only affects
+that child shell, not omp's environment. And a privileged/system variant
+(`sudo uv pip install`, `--system`, `--break-system-packages`) is rule 3: the
+override does not apply to it.
 
 ## The uv playbook (what to do instead)
 
@@ -49,7 +64,7 @@ pick a correct alternative on its own.
 |---|---|
 | pip-install for a one-off script | Add [PEP 723](https://peps.python.org/pep-0723/) inline metadata, then run with uv:<br>`uv add --script script.py <pkg>` → `uv run script.py` |
 | pip-install for a project | Declare deps in `pyproject.toml`:<br>`uv init` (if new) → `uv add <pkg>` → `uv run <entrypoint>` |
-| pip-install into a throwaway/managed venv | `uv venv && uv pip install <pkg>` |
+| Raw pip semantics into a venv (last resort) | `uv venv`, then `OMP_ALLOW_UV_PIP_INSTALL=1 uv pip install <pkg>` |
 | Run a CLI tool once | `uvx <pkg>` |
 | Install a CLI tool onto `PATH` | `uv tool install <pkg>` |
 | A tool with optional features (extras) | `uvx "<pkg>[extra1,extra2]"` — e.g. `uvx "yt-dlp[default,curl-cffi]"` (works with `uv tool install` too) |
@@ -59,8 +74,8 @@ pick a correct alternative on its own.
 | `pip list/freeze/show/tree/check` | `uv pip list/freeze/show/tree/check` (its own flag surface — see `uv pip <sub> --help`) |
 | List / upgrade / remove installed tools | `uv tool list` / `uv tool upgrade` / `uv tool uninstall` |
 
-`uv pip install` (into an active venv) is the literal drop-in when you just want
-pip's behavior; the block message says so, but prefers a first-class uv workflow.
+Plain `uv pip install` is a **soft block**, not a drop-in — reach for a script or
+project first, and use the override only when you genuinely need pip semantics.
 
 ## Install
 
@@ -105,7 +120,7 @@ enforce-uv/
   index.ts          # extension entry: tool_call bash interceptor + confirm override
   detect.ts         # pure command analysis (segment split, tokenize, classify)
   advice.ts         # builds the educational block message per violation kind
-  detect.test.ts    # bun test — 72 cases
+  detect.test.ts    # bun test — 89 cases
 ```
 
 ## Develop

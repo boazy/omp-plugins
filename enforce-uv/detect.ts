@@ -8,7 +8,8 @@ export type ViolationKind =
   | "pip-global" // pip install into the global/system env (rule 3)
   | "pip-other" // other pip subcommand with a `uv pip` equivalent (rule 1)
   | "pipx" // pipx used where uvx / `uv tool` fits (rule 2)
-  | "uv-global"; // `uv pip install --system/--break-system-packages`
+  | "uv-global" // `uv pip install --system/--break-system-packages` or under sudo (rule 3)
+  | "uv-pip"; // plain `uv pip install` — soft-blocked, overridable (rule 1)
 
 export interface Violation {
   kind: ViolationKind;
@@ -27,7 +28,15 @@ export interface Violation {
 export interface DetectOptions {
   /** Whether `uv` is on PATH. When false, rule 1/2 (pip→uv, pipx→uvx) are skipped. */
   uvAvailable: boolean;
+  /** Set when the override env var is present in the process environment. */
+  envOverride?: boolean;
 }
+
+/** Env var that opts into `uv pip install` after the first block. */
+export const OVERRIDE_ENV = "OMP_ALLOW_UV_PIP_INSTALL";
+
+/** Env values that count as "on" (`1` / `true` / `yes`, case-insensitive). */
+export const OVERRIDE_TRUTHY = /^(1|true|yes)$/i;
 
 // Command wrappers that precede the real command word.
 const WRAPPERS: Record<string, true> = {
@@ -41,6 +50,32 @@ const WRAPPERS: Record<string, true> = {
   stdbuf: true,
   setsid: true,
   env: true,
+};
+
+// sudo/doas options that consume a following argument (`sudo -u root cmd`), so
+// the argument isn't mistaken for the command word.
+const SUDO_VALUE_OPTS: Record<string, true> = {
+  "-u": true,
+  "--user": true,
+  "-g": true,
+  "--group": true,
+  "-h": true,
+  "--host": true,
+  "-p": true,
+  "--prompt": true,
+  "-C": true,
+  "--close-from": true,
+  "-r": true,
+  "--role": true,
+  "-t": true,
+  "--type": true,
+  "-U": true,
+  "--other-user": true,
+  "-R": true,
+  "--chroot": true,
+  "-D": true,
+  "--chdir": true,
+  "-a": true,
 };
 
 // Shells that take a `-c <script>` argument we must recurse into.
@@ -110,28 +145,38 @@ export function tokenize(segment: string): string[] {
 
 interface Head {
   sudo: boolean;
+  override: boolean;
   rest: string[];
 }
 
-/** Strip leading env assignments and command wrappers; detect sudo. */
+/** Strip leading env assignments and command wrappers; detect sudo and the override. */
 function stripHead(tokens: string[]): Head {
   let sudo = false;
+  let override = false;
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+    const assign = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(t);
+    if (assign) {
+      if (assign[1] === OVERRIDE_ENV && OVERRIDE_TRUTHY.test(assign[2])) override = true;
       i++;
       continue;
     }
     if (WRAPPERS[t]) {
-      if (t === "sudo" || t === "doas") sudo = true;
+      const isSudo = t === "sudo" || t === "doas";
+      if (isSudo) sudo = true;
       i++;
-      while (i < tokens.length && tokens[i].startsWith("-")) i++; // skip wrapper flags
+      while (i < tokens.length && tokens[i].startsWith("-")) {
+        const opt = tokens[i];
+        i++;
+        if (isSudo && SUDO_VALUE_OPTS[opt] && i < tokens.length && !tokens[i].startsWith("-"))
+          i++; // consume the option's argument (e.g. `-u root`)
+      }
       continue;
     }
     break;
   }
-  return { sudo, rest: tokens.slice(i) };
+  return { sudo, override, rest: tokens.slice(i) };
 }
 
 type Tool = { kind: "pip" | "pipx" | "uv"; label: string; args: string[] } | null;
@@ -155,14 +200,18 @@ function identifyTool(rest: string[]): Tool {
 }
 
 function analyzeSegment(segment: string, opts: DetectOptions): Violation | null {
-  const { sudo, rest } = stripHead(tokenize(segment));
+  const { sudo, override, rest } = stripHead(tokenize(segment));
   if (rest.length === 0) return null;
+
+  // A command-scoped override (`OMP_ALLOW_UV_PIP_INSTALL=1 …`) opts the whole
+  // segment in, including anything reached through a shell wrapper.
+  const eff = override ? { ...opts, envOverride: true } : opts;
 
   // Shell wrappers (`bash -c '<script>'`) hide the real command word inside a
   // quoted argument. Recurse into that script so the wrap doesn't dodge the guard.
   if (SHELLS[rest[0]]) {
     const ci = rest.findIndex((t, i) => i > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
-    return ci >= 0 && rest[ci + 1] ? analyzeCommand(rest[ci + 1], opts) : null;
+    return ci >= 0 && rest[ci + 1] ? analyzeCommand(rest[ci + 1], eff) : null;
   }
 
   const tool = identifyTool(rest);
@@ -172,21 +221,17 @@ function analyzeSegment(segment: string, opts: DetectOptions): Violation | null 
   const positionals = tool.args.filter((a) => !a.startsWith("-"));
 
   if (tool.kind === "uv") {
-    // uv/uvx are the blessed path; only a privileged or system/managed bypass is
-    // a violation (`uv pip install --system/--break-system-packages`, or under sudo).
+    // uvx / uv add / uv run are always fine. `uv pip install` is the pip-compat
+    // escape hatch: soft-blocked so the model considers a script/project first;
+    // a privileged/system variant is a hard rule-3 block the override can't bypass.
     if (rest[0] === "uv" && positionals[0] === "pip" && positionals[1] === "install") {
       const bad = flags.filter(
         (f) => f === "--system" || f === "--break-system-packages",
       );
       if (sudo || bad.length > 0)
-        return {
-          kind: "uv-global",
-          segment,
-          tool: "uv pip",
-          sub: "install",
-          sudo,
-          globalFlags: bad,
-        };
+        return { kind: "uv-global", segment, tool: "uv pip", sub: "install", sudo, globalFlags: bad };
+      if (eff.envOverride) return null;
+      return { kind: "uv-pip", segment, tool: "uv pip", sub: "install", sudo, globalFlags: [] };
     }
     return null;
   }
@@ -199,17 +244,17 @@ function analyzeSegment(segment: string, opts: DetectOptions): Violation | null 
     if (sub === "install" || sub === "uninstall") {
       if (isGlobal)
         return { kind: "pip-global", segment, tool: tool.label, sub, sudo, globalFlags };
-      if (opts.uvAvailable)
+      if (eff.uvAvailable)
         return { kind: "pip-install", segment, tool: tool.label, sub, sudo, globalFlags };
       return null;
     }
-    if (sub && UV_PIP_PARITY[sub] && opts.uvAvailable)
+    if (sub && UV_PIP_PARITY[sub] && eff.uvAvailable)
       return { kind: "pip-other", segment, tool: tool.label, sub, sudo, globalFlags };
     return null; // download/wheel/config/cache/hash/index — no clean uv parity
   }
 
   // pipx: only subcommands with a real uv equivalent (see PIPX_TO_UV).
-  if (tool.kind === "pipx" && opts.uvAvailable && sub && PIPX_TO_UV[sub])
+  if (tool.kind === "pipx" && eff.uvAvailable && sub && PIPX_TO_UV[sub])
     return { kind: "pipx", segment, tool: tool.label, sub, sudo, globalFlags };
 
   return null;

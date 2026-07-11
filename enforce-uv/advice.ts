@@ -2,7 +2,7 @@
 // pip/pipx violation is detected. Kept separate from detection so the prose can
 // be rich without bloating the wiring.
 
-import { PIPX_TO_UV, type Violation } from "./detect";
+import { OVERRIDE_ENV, PIPX_TO_UV, type Violation } from "./detect";
 
 // The uv playbook that replaces a global pip install. Referenced by several kinds.
 const UV_ALTERNATIVES = [
@@ -13,7 +13,7 @@ const UV_ALTERNATIVES = [
   "  • Project → declare deps in pyproject.toml:",
   "      uv init            # only if the project doesn't exist yet",
   "      uv add <pkg>       # then: uv run <entrypoint>",
-  "  • Throwaway/managed venv → uv venv && uv pip install <pkg>",
+  `  • Raw pip semantics into a venv (last resort) → ${OVERRIDE_ENV}=1 uv pip install <pkg>`,
   "  • CLI tool, run once → uvx <pkg>",
   "  • CLI tool, keep on PATH → uv tool install <pkg>",
   '  • Tool with optional features (extras) → uvx "<pkg>[extra1,extra2]"',
@@ -32,12 +32,33 @@ export function buildReason(v: Violation): string {
         `enforce-uv: don't reach for pip when uv is available (rule 1).`,
         seg,
         "",
-        `The literal drop-in is \`uv pip ${v.sub} …\` (same resolver, runs in the active venv),`,
-        "but prefer a first-class uv workflow:",
+        "Use a uv-native workflow, not pip:",
         "",
         ...UV_ALTERNATIVES,
         "",
         "If you genuinely need real pip here, re-run in an interactive session and confirm the prompt.",
+      ].join("\n");
+
+    case "uv-pip":
+      return [
+        "enforce-uv: pause before `uv pip install` (rule 1).",
+        seg,
+        "",
+        "`uv pip install` imperatively mutates a venv — it's the pip-compatibility",
+        "escape hatch and usually the wrong first move. Prefer a declarative setup:",
+        "",
+        "  • One-off / simple script → PEP 723 inline dependencies, run with uv:",
+        "      uv add --script <file>.py <pkg>     # writes the # /// script deps block",
+        "      uv run <file>.py",
+        "  • Complex / multi-file project → declare deps in pyproject.toml:",
+        "      uv init            # only if the project doesn't exist yet",
+        "      uv add <pkg>       # then: uv run <entrypoint>",
+        "  • CLI tool → uvx <pkg> (once)  /  uv tool install <pkg> (persist)",
+        "",
+        "If you truly need it, re-run with the override as a prefix on this same command:",
+        `      ${OVERRIDE_ENV}=1 ${v.segment}`,
+        `(A human can instead launch omp with ${OVERRIDE_ENV}=1 already exported to allow it session-wide.`,
+        " A bare 'export' inside a bash call won't work — it only affects that child shell.)",
       ].join("\n");
 
     case "pip-other":

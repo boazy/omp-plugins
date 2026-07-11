@@ -6,12 +6,16 @@
 //   rule 3: never install a package globally (no --break-system-packages,
 //           --user, sudo pip, or `uv pip install --system`)
 //
+// Plain `uv pip install` is soft-blocked (rule 1) but can be opted into per
+// command with `OMP_ALLOW_UV_PIP_INSTALL=1 …`, or session-wide by launching omp
+// with that variable exported.
+//
 // The block reason is written for the model: it names the rule and lists the
 // concrete uv workflow to use instead. In an interactive session the human can
 // override via a confirm prompt; headless/subagent runs are always blocked.
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { analyzeCommand } from "./detect";
+import { analyzeCommand, OVERRIDE_ENV, OVERRIDE_TRUTHY } from "./detect";
 import { buildReason } from "./advice";
 
 let uvAvailableCache: boolean | undefined;
@@ -33,7 +37,9 @@ export default function enforceUv(pi: ExtensionAPI): void {
     const command = input.command;
     if (typeof command !== "string" || command.length === 0) return;
 
-    const violation = analyzeCommand(command, { uvAvailable: uvAvailable() });
+    const envOverride =
+      typeof process !== "undefined" && OVERRIDE_TRUTHY.test(process.env[OVERRIDE_ENV] ?? "");
+    const violation = analyzeCommand(command, { uvAvailable: uvAvailable(), envOverride });
     if (!violation) return;
 
     const reason = buildReason(violation);
