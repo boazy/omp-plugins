@@ -128,7 +128,7 @@ enforce-uv/
   index.ts          # extension entry: tool_call bash interceptor + confirm override
   detect.ts         # pure command analysis (segment split, tokenize, classify)
   advice.ts         # builds the educational block message per violation kind
-  detect.test.ts    # bun test — 89 cases
+  detect.test.ts    # bun test — detection + advice suite
 ```
 
 ## Develop
