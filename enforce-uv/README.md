@@ -39,6 +39,10 @@ is.
 - If `uv` is **not** on `PATH`, rules 1 and 2 stand down (there is no uv to steer
   to). Rule 3 — the global-install guard — stays on regardless, because a
   system-wide pip install is dangerous either way.
+- Anything run through omp's `eval` tool (the stateful IPython `py` kernel). The
+  guard only intercepts the `bash` tool, so installing into a live kernel with
+  `!uv pip install <pkg>` / `%pip install <pkg>` inside a cell is never touched —
+  which is correct, since a live interpreter has no file to declare deps in.
 
 ## Override
 

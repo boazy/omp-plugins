@@ -211,6 +211,7 @@ describe("buildReason", () => {
     ["pipx inject black rich", /uv tool install <tool-pkg> --with <extra-pkg>/],
     ["uv pip install ruamel.yaml", /OMP_ALLOW_UV_PIP_INSTALL=1/],
     ["uv pip install foo", /pyproject\.toml/],
+    ["uv pip install foo", /%pip install/],
   ])("%s → reason matches %s", (cmd, re) => {
     const v = analyzeCommand(cmd, WITH_UV);
     expect(v).not.toBeNull();
