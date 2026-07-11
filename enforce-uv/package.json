@@ -1,6 +1,6 @@
 {
   "name": "omp-enforce-uv",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "oh-my-pi extension that blocks pip/pipx misuse and steers toward uv/uvx.",
   "keywords": [
     "omp",
