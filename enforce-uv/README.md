@@ -1,6 +1,6 @@
 # enforce-uv
 
-An [oh-my-pi](https://github.com/oh-my-pi) extension that intercepts `bash` tool
+An [oh-my-pi](https://github.com/can1357/oh-my-pi) extension that intercepts `bash` tool
 calls and **blocks pip / pipx misuse**, redirecting the agent to `uv` / `uvx`.
 
 It exists because documentation written by lazy authors — and LLMs trained on
@@ -81,9 +81,6 @@ override does not apply to it.
 | Pin the interpreter | Add `--python 3.12` to `uv run` / `uvx` / `uv venv` |
 | `pip list/freeze/show/tree/check` | `uv pip list/freeze/show/tree/check` (its own flag surface — see `uv pip <sub> --help`) |
 | List / upgrade / remove installed tools | `uv tool list` / `uv tool upgrade` / `uv tool uninstall` |
-
-Plain `uv pip install` is a **soft block**, not a drop-in — reach for a script or
-project first, and use the override only when you genuinely need pip semantics.
 
 ## Install
 
