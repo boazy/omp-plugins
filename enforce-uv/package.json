@@ -1,6 +1,6 @@
 {
   "name": "omp-enforce-uv",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "oh-my-pi extension that blocks pip/pipx misuse and steers toward uv/uvx.",
   "keywords": [
     "omp",
@@ -15,7 +15,15 @@
   ],
   "license": "MIT",
   "author": "Boaz Yaniv <boazyan@gmail.com>",
-  "homepage": "https://www.npmjs.com/package/omp-enforce-uv",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/boazy/omp-plugins.git",
+    "directory": "enforce-uv"
+  },
+  "bugs": {
+    "url": "https://github.com/boazy/omp-plugins/issues"
+  },
+  "homepage": "https://github.com/boazy/omp-plugins/tree/main/enforce-uv#readme",
   "type": "module",
   "files": [
     "index.ts",
