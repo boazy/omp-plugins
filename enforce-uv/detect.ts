@@ -257,13 +257,13 @@ function analyzeSegment(segment: string, opts: DetectOptions): Violation | null 
 
   // A command-scoped override (`OMP_ALLOW_UV_PIP_INSTALL=1 …`) opts the whole
   // segment in, including anything reached through a shell wrapper.
-  const eff = override ? { ...opts, envOverride: true } : opts;
+  const effectiveOpts = override ? { ...opts, envOverride: true } : opts;
 
   // Shell wrappers (`bash -c '<script>'`) hide the real command word inside a
   // quoted argument. Recurse into that script so the wrap doesn't dodge the guard.
   if (SHELLS[rest[0]]) {
     const ci = rest.findIndex((t, i) => i > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
-    return ci >= 0 && rest[ci + 1] ? analyzeCommand(rest[ci + 1], eff) : null;
+    return ci >= 0 && rest[ci + 1] ? analyzeCommand(rest[ci + 1], effectiveOpts) : null;
   }
 
   const tool = identifyTool(rest);
@@ -276,13 +276,13 @@ function analyzeSegment(segment: string, opts: DetectOptions): Violation | null 
     // uvx / uv add / uv run are always fine. `uv pip install` is the pip-compat
     // escape hatch: soft-blocked so the model considers a script/project first;
     // a privileged/system variant is a hard rule-3 block the override can't bypass.
-    if (rest[0] === "uv" && positionals[0] === "pip" && positionals[1] === "install") {
+    if (tool.label === "uv" && positionals[0] === "pip" && positionals[1] === "install") {
       const bad = flags.filter(
         (f) => f === "--system" || f === "--break-system-packages",
       );
       if (sudo || bad.length > 0)
         return { kind: "uv-global", segment, tool: "uv pip", sub: "install", sudo, globalFlags: bad };
-      if (eff.envOverride) return null;
+      if (effectiveOpts.envOverride) return null;
       return { kind: "uv-pip", segment, tool: "uv pip", sub: "install", sudo, globalFlags: [] };
     }
     return null;
@@ -296,17 +296,17 @@ function analyzeSegment(segment: string, opts: DetectOptions): Violation | null 
     if (sub === "install" || sub === "uninstall") {
       if (isGlobal)
         return { kind: "pip-global", segment, tool: tool.label, sub, sudo, globalFlags };
-      if (eff.uvAvailable)
+      if (effectiveOpts.uvAvailable)
         return { kind: "pip-install", segment, tool: tool.label, sub, sudo, globalFlags };
       return null;
     }
-    if (sub && UV_PIP_PARITY[sub] && eff.uvAvailable)
+    if (sub && UV_PIP_PARITY[sub] && effectiveOpts.uvAvailable)
       return { kind: "pip-other", segment, tool: tool.label, sub, sudo, globalFlags };
     return null; // download/wheel/config/cache/hash/index — no clean uv parity
   }
 
   // pipx: only subcommands with a real uv equivalent (see PIPX_TO_UV).
-  if (tool.kind === "pipx" && eff.uvAvailable && sub && PIPX_TO_UV[sub])
+  if (tool.kind === "pipx" && effectiveOpts.uvAvailable && sub && PIPX_TO_UV[sub])
     return { kind: "pipx", segment, tool: tool.label, sub, sudo, globalFlags };
 
   return null;
