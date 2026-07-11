@@ -10,9 +10,10 @@
 // command with `OMP_ALLOW_UV_PIP_INSTALL=1 …`, or session-wide by launching omp
 // with that variable exported.
 //
-// The block reason is written for the model: it names the rule and lists the
-// concrete uv workflow to use instead. In an interactive session the human can
-// override via a confirm prompt; headless/subagent runs are always blocked.
+// Every violation is blocked and the reason is returned to the model — there is
+// no interactive prompt (it could hang in non-interactive/agent contexts). The
+// only sanctioned bypass is the OMP_ALLOW_UV_PIP_INSTALL override above, and only
+// for plain `uv pip install`.
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { analyzeCommand, OVERRIDE_ENV, OVERRIDE_TRUTHY } from "./detect";
@@ -29,7 +30,7 @@ function uvAvailable(): boolean {
 }
 
 export default function enforceUv(pi: ExtensionAPI): void {
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("tool_call", (event) => {
     if (event.toolName !== "bash") return;
 
     const input = event.input;
@@ -42,18 +43,6 @@ export default function enforceUv(pi: ExtensionAPI): void {
     const violation = analyzeCommand(command, { uvAvailable: uvAvailable(), envOverride });
     if (!violation) return;
 
-    const reason = buildReason(violation);
-
-    // Interactive escape hatch: a present human may knowingly override. The
-    // agent cannot self-approve — no UI means the command is blocked.
-    if (ctx.hasUI) {
-      const allow = await ctx.ui.confirm(
-        "enforce-uv: pip/pipx blocked",
-        `${reason}\n\nRun it anyway?`,
-      );
-      if (allow) return;
-    }
-
-    return { block: true, reason };
+    return { block: true, reason: buildReason(violation) };
   });
 }

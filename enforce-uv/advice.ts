@@ -35,8 +35,6 @@ export function buildReason(v: Violation): string {
         "Use a uv-native workflow, not pip:",
         "",
         ...UV_ALTERNATIVES,
-        "",
-        "If you genuinely need real pip here, re-run in an interactive session and confirm the prompt.",
       ].join("\n");
 
     case "uv-pip":

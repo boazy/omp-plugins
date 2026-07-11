@@ -50,10 +50,11 @@ is.
 
 ## Override
 
-The hard blocks — rules 2–3 and `pip install` — have **no command-line escape
-hatch**, by design: the agent would just prepend it. Their only bypass is an
-interactive human confirming the prompt; headless / subagent runs are always
-blocked, with the reason returned to the model so it can pick an alternative.
+The hard blocks — rules 2–3 and `pip install` — have **no bypass**: they are
+always blocked and the reason is returned to the model so it can pick a correct
+uv alternative. (There is deliberately no interactive prompt — it could hang in
+non-interactive/agent contexts, and a safety rule shouldn't be waved through by a
+hurried confirmation.)
 
 The one **soft** block — plain `uv pip install` — is overridable so a deliberate
 install can proceed:
@@ -122,7 +123,7 @@ omp --extension ~/projects/personal/omp-plugins/enforce-uv
 ```
 enforce-uv/
   package.json      # omp.extensions manifest → ./index.ts
-  index.ts          # extension entry: tool_call bash interceptor + confirm override
+  index.ts          # extension entry: tool_call bash interceptor (always block + reason)
   detect.ts         # pure command analysis (segment split, tokenize, classify)
   advice.ts         # builds the educational block message per violation kind
   detect.test.ts    # bun test — detection + advice suite
