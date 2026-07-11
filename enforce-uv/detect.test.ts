@@ -106,6 +106,8 @@ describe("uv pip install is soft-blocked (rule 1)", () => {
     "uv pip install -r requirements.txt",
     "uv pip install --python /tmp/.venv/bin/python ruamel.yaml",
     "bash -c 'uv pip install foo'",
+    "uv pip install --quiet pandas matplotlib 2>&1 | tail -3",
+    'cd ~/tmp/test-py && uv venv --quiet 2>&1 | tail -2 && uv pip install --quiet pandas matplotlib 2>&1 | tail -3 && .venv/bin/python -c "import pandas; print(pandas.__version__)"',
   ])("blocks %s as uv-pip", (cmd) => {
     expect(kind(cmd)).toBe("uv-pip");
   });
@@ -148,8 +150,28 @@ describe("no false positives on unrelated commands", () => {
     'git commit -m "fix pip install docs"',
     "grep -r 'pipx' .",
     "cat requirements.txt",
+    'grep -nE "uv pip install|pip install|pipx" file.txt',
+    "echo 'pip install x'",
+    'echo "a; pip install b | pipx run c"',
+    'echo "a\\"; pip install x"',
   ])("ignores %s", (cmd) => {
     expect(kind(cmd)).toBeNull();
+  });
+});
+
+describe("quote-aware segment splitting", () => {
+  test.each<[string, ViolationKind]>([
+    ["uv pip install pandas 2>&1", "uv-pip"],
+    ["uv pip install --quiet pandas 2>&1 | tail -3", "uv-pip"],
+    ["pip install foo & pip install bar", "pip-install"],
+    ["pip install foo ; echo done", "pip-install"],
+  ])("still detects real separators: %s → %s", (cmd, expected) => {
+    expect(kind(cmd)).toBe(expected);
+  });
+
+  test("redirection & is not a command separator", () => {
+    // `2>&1` must not split into a bogus `1` segment or drop the uv detection.
+    expect(kind("uv pip install foo 2>&1")).toBe("uv-pip");
   });
 });
 

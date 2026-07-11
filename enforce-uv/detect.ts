@@ -124,12 +124,64 @@ export const PIPX_TO_UV: Record<string, string> = {
   ensurepath: "uv tool update-shell",
 };
 
-/** Split a compound command into simple-command segments. */
+/**
+ * Split a compound command into simple-command segments on `&&`, `||`, `;`, `|`,
+ * `&`, and newlines — but never inside single/double quotes (so a grep/regex
+ * argument like `"pip install|foo"` stays one segment), and never on the `&` of a
+ * redirection (`2>&1`, `&>`, `>&`).
+ */
 export function splitSegments(cmd: string): string[] {
-  return cmd
-    .split(/&&|\|\||[;\n|]|&(?!&)/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const segments: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    // Backslash escapes the next char, except inside single quotes (bash keeps it
+    // literal there). Copy both so an escaped quote/separator can't mis-split.
+    if (c === "\\" && quote !== "'") {
+      cur += c;
+      if (i + 1 < cmd.length) {
+        cur += cmd[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (c === ";" || c === "\n") {
+      segments.push(cur);
+      cur = "";
+      continue;
+    }
+    if (c === "|") {
+      if (cmd[i + 1] === "|") i++; // ||
+      segments.push(cur);
+      cur = "";
+      continue;
+    }
+    if (c === "&") {
+      if (cmd[i + 1] === "&") {
+        i++; // &&
+      } else if (cmd[i - 1] === ">" || cmd[i + 1] === ">") {
+        cur += c; // redirection (2>&1, &>, >&) — not a separator
+        continue;
+      }
+      segments.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  segments.push(cur);
+  return segments.map((s) => s.trim()).filter(Boolean);
 }
 
 /** Tokenize a segment, honoring simple single/double quotes. */
